@@ -10,12 +10,12 @@
 #               国服、国际服都需要。
 #   国际服适配  原生遮罩只认国服主程序 yysls.exe，改成认国际服的 wwm.exe。只有国际服需要；
 #               脚本按游戏目录里是 wwm.exe 还是 yysls.exe 自动决定。
-#   另外 V6.3.5 / V6.38 有一项"放宽库外材质检查"：遮罩库里没有的材质着色器不再让整帧遮罩作废，
+#   另外 V6.3.5 / V6.38 / V6.3 威力加强版 R7 有一项"放宽库外材质检查"：遮罩库里没有的材质着色器不再让整帧遮罩作废，
 #   改为当作场景处理（国际服有一部分材质不在作者的库里）。V6.3 没有这一项。可用 -NoRelax 关掉。
 #
-# 安全性：动手之前先把所有补丁位置在内存里还原，结果必须与作者原版引擎的 SHA-256 完全一致，
-# 否则不改文件。所以 Revert 还原出来的就是原版，不需要任何备份文件。只修改游戏目录里已安装的引擎，
-# 不包含、不分发作者的任何文件。
+# 已知版本：还原补丁位置后的 SHA-256 必须与内置原版一致。
+# 未知版本：用 PE 函数边界和多组代码/数据引用定位；首次 Apply 保存完整原始副本。
+# 自动定位只能确认受支持的代码结构，不能认证来源，也不保证适配任意未来版本。
 param(
     [ValidateSet('Status','Apply','Revert')]
     [string]$Action='Status',
@@ -23,7 +23,8 @@ param(
     [ValidateSet('Auto','CN','Intl')]
     [string]$Client='Auto',
     [switch]$NoMaskFix,
-    [switch]$NoRelax
+    [switch]$NoRelax,
+    [switch]$KnownOnly
 )
 $ErrorActionPreference='Stop'
 
@@ -44,7 +45,11 @@ $Profiles=@(
     @{Name='V6.38';Size=86178304;Sha='721810f3eeee5e74c87cd5d7249be6735e61910a4eefe44a126f0e89f1a329d0';PinOffset=0x457950
       ExeSite=@(0x338F40,$ExeCheckOld,$ExeCheckNew)
       IntlSites=@(,@(0x2BA234,@(0x80),@(0x98)))
-      RelaxSites=@(@(0x27CCF5,@(0x39),@(0xDF)),@(0x27D543,@(0x39),@(0xDF)),@(0x27DDD3,@(0x39),@(0xDF)),@(0x27E651,@(0x3A),@(0xDF)))}
+      RelaxSites=@(@(0x27CCF5,@(0x39),@(0xDF)),@(0x27D543,@(0x39),@(0xDF)),@(0x27DDD3,@(0x39),@(0xDF)),@(0x27E651,@(0x3A),@(0xDF)))},
+    @{Name='V6.3 威力加强版 R7';Size=99357696;Sha='2ed0bd484068e13e289ad79554e7c0780cf784196a51c17ceed7c106af3f8470';PinOffset=0x45FD40
+      ExeSite=@(0x33FA10,$ExeCheckOld,$ExeCheckNew)
+      IntlSites=@(,@(0x2BB824,@(0x50),@(0x68)))
+      RelaxSites=@(@(0x27CD95,@(0x39),@(0xDF)),@(0x27D5E3,@(0x39),@(0xDF)),@(0x27DE73,@(0x39),@(0xDF)),@(0x27E6F1,@(0x3A),@(0xDF)))}
 )
 
 function Get-Sha([byte[]]$Bytes){
@@ -85,22 +90,86 @@ function Set-Site([byte[]]$Bytes,$Site,[bool]$Patched){
 }
 function Get-AllSites($Spec){return @(,$Spec.ExeSite)+@($Spec.IntlSites)+@($Spec.RelaxSites)}
 function Get-Pin([byte[]]$Bytes,$Spec){return [Text.Encoding]::ASCII.GetString($Bytes,$Spec.PinOffset,64)}
-function Reset-Pin([byte[]]$Bytes,$Spec){[Text.Encoding]::ASCII.GetBytes($PinOriginal).CopyTo($Bytes,$Spec.PinOffset)}
-# 读引擎、按大小认版本，并证明它是作者发布的那一份：所有补丁位置还原后必须与原版 SHA-256 一致
+function Get-OriginalPin($Spec){if($Spec.ContainsKey('OriginalPin')){return $Spec.OriginalPin};return $PinOriginal}
+function Reset-Pin([byte[]]$Bytes,$Spec){[Text.Encoding]::ASCII.GetBytes((Get-OriginalPin $Spec)).CopyTo($Bytes,$Spec.PinOffset)}
+function Get-AutoSpec([byte[]]$Bytes){
+    if(-not ('EngineDetector' -as [type])){Add-Type -Path (Join-Path $PSScriptRoot 'auto-detect.cs')}
+    $d=[EngineDetector]::Locate($Bytes)
+    $sha=Get-Sha $Bytes
+    $relax=@();for($i=0;$i -lt $d.RelaxOffsets.Length;$i++){$relax+=,@($d.RelaxOffsets[$i],@($d.RelaxOld[$i]),@(0xDF))}
+    return @{Name=('自动适配 '+$sha.Substring(0,12));Size=$Bytes.Length;Sha=$sha;Auto=$true
+        OriginalPin=[Text.Encoding]::ASCII.GetString($Bytes,$d.PinOffset,64);PinOffset=$d.PinOffset
+        ExeSite=@($d.ExeOffset,$ExeCheckOld,$ExeCheckNew)
+        IntlSites=@(,@($d.IntlOffset,$d.IntlOld,$d.IntlNew));RelaxSites=$relax}
+}
+function Test-Profile([byte[]]$Bytes,$Spec){
+    if($Bytes.Length -ne $Spec.Size){return $false}
+    $probe=[byte[]]$Bytes.Clone()
+    foreach($site in (Get-AllSites $Spec)){
+        if((Get-SiteState $Bytes $site) -eq 'unknown'){return $false}
+        Set-Site $probe $site $false
+    }
+    if((Get-Pin $Bytes $Spec) -cnotmatch '^[0-9a-f]{64}$' -or $Bytes[$Spec.PinOffset+64] -ne 0){return $false}
+    # Auto profiles never rewrite a whitelist string; only legacy built-in profiles do.
+    if($Spec.Auto -and (Get-Pin $Bytes $Spec) -cne $Spec.OriginalPin){return $false}
+    Reset-Pin $probe $Spec
+    return (Get-Sha $probe) -eq $Spec.Sha
+}
+# No offsets are trusted from disk. A saved original is hashed and scanned again.
+function Read-SavedProfile([string]$Path,[byte[]]$Bytes){
+    $stateDir=$Path+'.patch-033'
+    if(-not [IO.Directory]::Exists($stateDir)){return $null}
+    foreach($file in Get-ChildItem -LiteralPath $stateDir -Filter '*.original.dll' -File){
+        if($file.Name -notmatch '^([0-9a-f]{64})\.original\.dll$' -or $file.Length -ne $Bytes.Length){continue}
+        $expected=$Matches[1]
+        $original=[IO.File]::ReadAllBytes($file.FullName)
+        if((Get-Sha $original) -ne $expected){throw ('恢复副本校验失败：'+$file.FullName)}
+        $spec=Get-AutoSpec $original
+        if(Test-Profile $Bytes $spec){return $spec}
+    }
+    return $null
+}
+# Try all built-in profiles of this size, then local recovery data, then structural detection.
 function Read-Engine([string]$Path){
     if(-not [IO.File]::Exists($Path)){throw "找不到引擎文件：$Path"}
     $bytes=[IO.File]::ReadAllBytes($Path)
-    $spec=$null;foreach($candidate in $Profiles){if($candidate.Size -eq $bytes.Length){$spec=$candidate}}
-    if(-not $spec){throw ('不认识这个引擎的版本（支持 '+(($Profiles|ForEach-Object {$_.Name}) -join '、')+'），没有改动。')}
-    $probe=[byte[]]$bytes.Clone()
-    foreach($site in (Get-AllSites $spec)){
-        if((Get-SiteState $bytes $site) -eq 'unknown'){throw ('补丁位置 0x{0:X} 的内容不认识，没有改动。' -f $site[0])}
-        Set-Site $probe $site $false
+    foreach($candidate in $Profiles){
+        if($candidate.Size -eq $bytes.Length -and (Test-Profile $bytes $candidate)){return @{Bytes=$bytes;Spec=$candidate}}
     }
-    if((Get-Pin $bytes $spec) -notmatch '^[0-9a-f]{64}$' -or $bytes[$spec.PinOffset+64] -ne 0){throw '主程序哈希位置的内容不认识，没有改动。'}
-    Reset-Pin $probe $spec
-    if((Get-Sha $probe) -ne $spec.Sha){throw ('这不是作者发布的 '+$spec.Name+' 引擎（还原补丁位置后与原版不符），没有改动。')}
+    if($KnownOnly){throw '文件与内置已知版本不符；-KnownOnly 禁止自动适配。没有改动。'}
+    $spec=Read-SavedProfile $Path $bytes
+    if(-not $spec){$spec=Get-AutoSpec $bytes}
     return @{Bytes=$bytes;Spec=$spec}
+}
+function Save-Original([string]$Path,[byte[]]$Bytes,$Spec){
+    if(-not $Spec.Auto){return}
+    $original=[byte[]]$Bytes.Clone()
+    foreach($site in (Get-AllSites $Spec)){Set-Site $original $site $false}
+    if((Get-Sha $original) -ne $Spec.Sha){throw '恢复副本与原始哈希不符，没有改动。'}
+    $stateDir=$Path+'.patch-033'
+    [void][IO.Directory]::CreateDirectory($stateDir)
+    $backup=Join-Path $stateDir ($Spec.Sha+'.original.dll')
+    if([IO.File]::Exists($backup)){
+        if((Get-Sha ([IO.File]::ReadAllBytes($backup))) -ne $Spec.Sha){throw '已有恢复副本损坏，没有改动。'}
+        return
+    }
+    $temp=Join-Path $stateDir ([Guid]::NewGuid().ToString('N')+'.tmp')
+    try{
+        [IO.File]::WriteAllBytes($temp,$original)
+        if((Get-Sha ([IO.File]::ReadAllBytes($temp))) -ne $Spec.Sha){throw '恢复副本写入校验失败，没有改动。'}
+        [IO.File]::Move($temp,$backup)
+    }finally{if([IO.File]::Exists($temp)){[IO.File]::Delete($temp)}}
+    Write-Host ('已保存原始引擎：'+$backup)
+}
+function Write-Engine([string]$Path,[byte[]]$Bytes,[string]$ExpectedSha){
+    $temp=$Path+'.'+[Guid]::NewGuid().ToString('N')+'.tmp'
+    try{
+        [IO.File]::WriteAllBytes($temp,$Bytes)
+        if((Get-Sha ([IO.File]::ReadAllBytes($temp))) -ne (Get-Sha $Bytes)){throw '临时文件写入校验失败，没有改动引擎。'}
+        Assert-GameClosed
+        if((Get-Sha ([IO.File]::ReadAllBytes($Path))) -ne $ExpectedSha){throw '引擎在处理期间被其他程序修改，请重试。没有覆盖文件。'}
+        [IO.File]::Replace($temp,$Path,[System.Management.Automation.Language.NullString]::Value)
+    }finally{if([IO.File]::Exists($temp)){[IO.File]::Delete($temp)}}
 }
 function Get-ClientKind([string]$EnginePath){
     if($Client -ne 'Auto'){return $Client}
@@ -121,7 +190,12 @@ function Show-Status([string]$Path){
     Write-Host ('  遮罩层修复        ：'+(Format-State $bytes @(,$spec.ExeSite)))
     Write-Host ('  国际服适配        ：'+(Format-State $bytes $spec.IntlSites))
     Write-Host ('  放宽库外材质检查  ：'+(Format-State $bytes $spec.RelaxSites))
-    if((Get-Pin $bytes $spec) -ne $PinOriginal){Write-Host '  （白名单里有旧版补丁写入的哈希，运行 Apply 或 Revert 会改回原样）'}
+    if($spec.Auto){
+        Write-Host '  识别方式          ：代码特征自动定位（来源未经内置哈希认证）'
+        Write-Host ('  原始 SHA-256      ：'+$spec.Sha)
+        Write-Host ('  恢复副本目录      ：'+$Path+'.patch-033')
+    }
+    if((Get-Pin $bytes $spec) -cne (Get-OriginalPin $spec)){Write-Host '  （白名单里有旧版补丁写入的哈希，运行 Apply 或 Revert 会改回原样）'}
     Write-Host ('  SHA-256           ：'+(Get-Sha $bytes))
 }
 
@@ -133,22 +207,25 @@ try{
         'Apply'{
             Assert-GameClosed
             $loaded=Read-Engine $Engine;$bytes=$loaded.Bytes;$spec=$loaded.Spec;$kind=Get-ClientKind $Engine
+            $before=Get-Sha $bytes
+            Save-Original $Engine $bytes $spec
             Set-Site $bytes $spec.ExeSite (-not $NoMaskFix)
             foreach($site in $spec.IntlSites){Set-Site $bytes $site ($kind -eq 'Intl')}
             foreach($site in $spec.RelaxSites){Set-Site $bytes $site (-not $NoRelax)}
             Reset-Pin $bytes $spec
-            [IO.File]::WriteAllBytes($Engine,$bytes)
+            Write-Engine $Engine $bytes $before
             Write-Host ('已为 '+$spec.Name+' 打好补丁。') -ForegroundColor Green
             Show-Status $Engine
         }
         'Revert'{
             Assert-GameClosed
             $loaded=Read-Engine $Engine;$bytes=$loaded.Bytes;$spec=$loaded.Spec
+            $before=Get-Sha $bytes
             foreach($site in (Get-AllSites $spec)){Set-Site $bytes $site $false}
             Reset-Pin $bytes $spec
             if((Get-Sha $bytes) -ne $spec.Sha){throw '还原后与原版核对不上，没有改动。'}
-            [IO.File]::WriteAllBytes($Engine,$bytes)
-            Write-Host ('已还原成作者发布的 '+$spec.Name+' 原版引擎，现在可以用 033 安装器卸载或升级。') -ForegroundColor Green
+            Write-Engine $Engine $bytes $before
+            Write-Host ('已还原 '+$spec.Name+' 补丁前的引擎，现在可以用 033 安装器卸载或升级。') -ForegroundColor Green
         }
     }
 }catch{
