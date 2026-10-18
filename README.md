@@ -1,62 +1,60 @@
-# 人景分离 / 国际服补丁 for 033 插件
+# Mask Layer & International Server Patch for 033 DLSS5 Plugin
 
-**Person-Scene Separation & International Server Patch for 033 Plugin**
+[中文文档](README.zh-CN.md)
 
-给 B站@热心网友033 的「033 燕云定制版」DLSS5 插件用的非官方引擎补丁，修两个问题：
+> Fixes broken person/scene separation in the 033 Yanyun DLSS5 plugin V6.3 after game updates, and enables its native masks on the international client.
 
-1. **遮罩层修复（国服、国际服都适用）**：游戏更新后人景分离 / 原生遮罩失效。
-2. **国际服适配**：原生遮罩只认国服主程序，国际服（Where Winds Meet，`wwm.exe`）用不上。
+This is an unofficial patch for the "033 Yanyun edition" DLSS5 plugin by Bilibili creator @热心网友033, made for *Where Winds Meet* / 燕云十六声.
 
-支持的 033 版本：**V6.3、V6.3.5、V6.38**（按引擎文件大小和 SHA-256 识别，其他版本一律不动）。
+**The main target is V6.3.** After a game update, V6.3 keeps showing its native skin-mask panel, but person/scene separation silently stops working: characters and scenery get the same effect. This affects both the Chinese and the international client. The patch fixes that, and also lets the native masks run on the international client (`wwm.exe`), which the plugin otherwise only enables for the Chinese client (`yysls.exe`).
 
-> 本项目与 033 作者、网易无关，不包含也不分发作者的任何文件，只修改你本机已经用 033 安装器装好的那份引擎。
+V6.3.5 and V6.38 are supported as well.
 
-## ⚠️ 使用风险（请先读完）
+The patch only edits the plugin engine that the 033 installer has already put in your game folder. It contains no files from the plugin author.
 
-- **这是非官方修改。** 它改的是 033 作者发布的程序，作者没有审核过，可能出现作者没测过的画面问题、闪退或其他异常。
-- **网游有反作弊。** 033 本身就是注入游戏的第三方插件，使用它（以及本补丁）都可能违反游戏的用户协议。游戏方是否会因此处罚（包括封号）不在本项目控制之内，**风险由使用者自行承担**。
-- **033 安装器会认为文件被改过。** 用 033 安装器「还原安装前」或升级之前，先运行 `revert.cmd` 把引擎还原成原版，否则安装器可能报文件被替换、留下残留文件。
-- **游戏或 033 更新后需要重新确认。** 新的 033 版本本补丁不认识时会直接拒绝修改；游戏更新导致着色器变化时，原生遮罩可能仍然无法覆盖全部材质。
-- 作者在发布包里说明过不希望二次分发，本项目只提供补丁脚本。遇到 033 本身的问题请去找作者，遇到补丁的问题请在本仓库提 issue，不要把补丁导致的问题反馈给作者。
+## ⚠️ Risks — read before use
 
-## 用法
+- **This is an unofficial modification.** It changes software published by the plugin author and has not been reviewed by them. It may cause visual problems, crashes or other issues the author never tested.
+- **The game is online and has anti-cheat.** The 033 plugin is already a third-party component injected into the game, and using it (and this patch) may violate the game's terms of service. Whether the game operator penalizes this, including account bans, is outside this project's control. **Use entirely at your own risk.**
+- **The 033 installer will see the engine as modified.** Run `remove-patch.cmd` before using the 033 installer to uninstall ("还原安装前") or upgrade, otherwise the installer may report a replaced file or leave it behind.
+- **New versions are refused.** If the plugin releases a version this patch does not know, the script refuses to change anything. Game updates that change shaders may still leave some materials uncovered by the native masks.
+- The plugin author has asked that their package not be redistributed; this project only ships a patch script. Report problems with the plugin itself to the author, and problems with this patch as an issue here. Please do not send patch-caused problems to the plugin author.
 
-1. 完全退出游戏。
-2. 用 033 安装器正常安装（或升级）033。
-3. 双击 `apply.cmd` 打补丁。脚本会从 033 安装器的记录里自动找到游戏，看到 `wwm.exe` 就同时打国际服适配，看到 `yysls.exe` 只打遮罩层修复。
-4. 想卸载或升级 033 之前，双击 `revert.cmd` 还原；`status.cmd` 只查看状态，不改文件。
+## Usage
 
-命令行用法：
+1. Quit the game completely.
+2. Install (or upgrade) the plugin with the 033 installer as usual.
+3. Double-click **`apply-patch.cmd`**. It finds the game from the 033 installer's records. With `wwm.exe` it also applies the international-client part; with `yysls.exe` it applies only the mask fix.
+4. Before uninstalling or upgrading the plugin, double-click **`remove-patch.cmd`** to remove the patch and restore the author's original engine.
+5. **`check-status.cmd`** only shows the current state and changes nothing.
+
+You do not need to run `patch-033.ps1` yourself; the three `.cmd` files call it. From a command line:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File patch-033.ps1 -Action Status|Apply|Revert [-Engine <033-runtime\033-engine.dll 的路径>] [-Client Auto|CN|Intl] [-NoMaskFix] [-NoRelax]
+powershell -ExecutionPolicy Bypass -File patch-033.ps1 -Action Status|Apply|Revert [-Engine <path to 033-runtime\033-engine.dll>] [-Client Auto|CN|Intl] [-NoMaskFix] [-NoRelax]
 ```
 
-## 原理
+## How it works
 
-**遮罩层修复**：033 的引擎里写死了作者测试时那一版国服主程序的 SHA-256（"白名单"）。插件启动时会对正在运行的游戏主程序算一遍哈希，对不上就跳过"着色器登记"，原生遮罩一帧都画不出来；而面板是否切换到遮罩界面看的是另一项检查，于是出现"界面是遮罩模式、画面却没有人景分离"。游戏每次更新主程序都会让白名单过期。补丁把这个检查函数开头 5 个字节改成直接返回"通过"。
+**Mask fix (both clients).** The plugin engine contains the SHA-256 of the one Chinese game executable the author tested. At startup it hashes the running game executable, and if it does not match, it skips shader registration entirely, so the native mask is never drawn. Whether the panel switches to the mask UI depends on a different check, which is why you see the mask panel but no separation. Every game update changes the executable and breaks the match. The patch changes the first 5 bytes of that check function so it returns "pass".
 
-着色器本身仍然按精确哈希匹配，游戏更新后对不上的着色器照样不会被替换，所以去掉主程序检查不会让遮罩套到错误的着色器上。
+Shaders are still matched by their exact hash, so a shader that changed in a game update is never replaced. Removing the executable check cannot make the mask apply to the wrong shader.
 
-**国际服适配**：原生遮罩的开关只比对文件名 `yysls.exe`，补丁让它比对 `wwm.exe`。
+**International client.** The native-mask switch only compares the executable name with `yysls.exe`; the patch makes it compare with `wwm.exe`.
 
-**放宽库外材质检查（仅 V6.3.5 / V6.38）**：这两个版本只要画面里出现一个不在作者遮罩库里的材质着色器，就把整帧遮罩作废、保留原画。国际服有一部分材质不在库里，补丁让这类材质当作"场景"处理，其余照常出遮罩。代价是库外材质挡在人物前面时，那一小块可能按人物处理。可以用 `-NoRelax` 关掉。
+**Relaxed unknown-material check (V6.3.5 / V6.38 only).** In these versions, a single material shader that is not in the author's mask library voids the masks for the whole frame. Part of the international client's materials are not in the library. The patch treats such materials as scenery and keeps the rest of the mask. The trade-off: where such a material covers a character, that small area may be processed as the character. Disable with `-NoRelax`.
 
-**安全检查**：动手前，脚本先把所有补丁位置在内存里还原，结果必须与作者原版引擎的 SHA-256 完全一致才会写入。因此 `Revert` 不需要任何备份，还原出来的就是原版。
+**Safety check.** Before writing, the script restores every patch location in memory and requires the result to match the author's original engine SHA-256 exactly. So `remove-patch.cmd` needs no backup: what it restores is byte-identical to the original.
 
-## 修改位置
+## Patched locations
 
-| 版本 | 原版 SHA-256 | 遮罩层修复（5 字节） | 国际服适配 | 放宽检查 |
+| Version | Original SHA-256 | Mask fix (5 bytes) | International client | Relaxed check |
 |---|---|---|---|---|
-| V6.3 | `d69c4e8b…a42b637` | `0x2F9110` | `0x29BAE0`、`0x29BAEA` | 无 |
-| V6.3.5 | `4dfe6ac3…d056b0c` | `0x327AB0` | `0x2ABB74`–`0x2ABB75` | `0x2743E5`、`0x274BE3`、`0x275423`、`0x275C51` |
-| V6.38 | `721810f3…f1a329d0` | `0x338F40` | `0x2BA234` | `0x27CCF5`、`0x27D543`、`0x27DDD3`、`0x27E651` |
+| V6.3 | `d69c4e8b…a42b637` | `0x2F9110` | `0x29BAE0`, `0x29BAEA` | none |
+| V6.3.5 | `4dfe6ac3…d056b0c` | `0x327AB0` | `0x2ABB74`–`0x2ABB75` | `0x2743E5`, `0x274BE3`, `0x275423`, `0x275C51` |
+| V6.38 | `721810f3…f1a329d0` | `0x338F40` | `0x2BA234` | `0x27CCF5`, `0x27D543`, `0x27DDD3`, `0x27E651` |
 
-遮罩层修复把 `48 89 5C 24 08` 改为 `B0 01 C3 90 90`（`mov al,1; ret`）。
-
-## English
-
-Unofficial patch script for the "033 Yanyun edition" DLSS5 plugin (V6.3 / V6.3.5 / V6.38). It (1) bypasses the plugin's pinned game-executable hash check, which silently disables the native masks after every game update, and (2) lets the native masks run on the international client (`wwm.exe`). No files from the plugin author are included; the script only edits the locally installed engine and refuses to touch anything that does not revert to the author's exact release. **Use at your own risk:** this modifies third-party software injected into an online game with anti-cheat, and may violate the game's terms of service.
+The mask fix changes `48 89 5C 24 08` to `B0 01 C3 90 90` (`mov al,1; ret`).
 
 ## License
 
