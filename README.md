@@ -4,7 +4,7 @@
 
 > Fixes broken person/scene separation in the 033 Yanyun DLSS5 plugin V6.3 after game updates, and enables its native masks on the international client.
 
-This is an unofficial patch for the "033 Yanyun edition" DLSS5 plugin by Bilibili creator @热心网友033, made for *Where Winds Meet* / 燕云十六声.
+This is an unofficial patch for the "033 Yanyun edition" DLSS5 plugin by Bilibili creator [@热心网友033](https://space.bilibili.com/88101991), made for *Where Winds Meet* / 燕云十六声. This project is not affiliated with or endorsed by the plugin author.
 
 **The main target is V6.3.** After a game update, V6.3 keeps showing its native skin-mask panel, but person/scene separation silently stops working: characters and scenery get the same effect. This affects both the Chinese and the international client. The patch fixes that, and also lets the native masks run on the international client (`wwm.exe`), which the plugin otherwise only enables for the Chinese client (`yysls.exe`).
 
@@ -23,7 +23,7 @@ The patch only edits the plugin engine that the 033 installer has already put in
 ## Usage
 
 1. Quit the game completely.
-2. Install (or upgrade) the plugin with the 033 installer as usual.
+2. Install (or upgrade) the plugin with the 033 installer as usual. Get the plugin only from the author's Bilibili page: https://space.bilibili.com/88101991
 3. Double-click **`apply-patch.cmd`**. It finds the game from the 033 installer's records. With `wwm.exe` it also applies the international-client part; with `yysls.exe` it applies only the mask fix.
 4. Before uninstalling or upgrading the plugin, double-click **`remove-patch.cmd`** to remove the patch and restore the author's original engine.
 5. **`check-status.cmd`** only shows the current state and changes nothing.
