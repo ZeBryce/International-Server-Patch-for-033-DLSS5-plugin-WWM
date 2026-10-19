@@ -1,4 +1,4 @@
-# 遮罩层与国际服补丁 for 033 DLSS5 插件
+# 燕云033插件国际服补丁
 
 [English](README.md)
 
