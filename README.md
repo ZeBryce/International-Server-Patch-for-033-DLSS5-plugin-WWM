@@ -1,4 +1,4 @@
-# Mask Layer & International Server Patch for 033 DLSS5 Plugin
+# International Server Patch for 033 DLSS5 plugin (Where Winds Meet)
 
 [中文文档](README.zh-CN.md)
 
