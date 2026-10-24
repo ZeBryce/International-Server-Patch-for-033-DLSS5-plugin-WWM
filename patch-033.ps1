@@ -4,6 +4,9 @@
 #   Apply   打补丁
 #   Revert  还原成作者发布的原版引擎（用 033 安装器卸载或升级之前先运行）
 #
+# 不指定 -Engine 时自动查找所有装了 033 的游戏（含同一游戏的 Win64r / Win64rh）。
+# Status 逐个列出；Apply / Revert 在国服、国际服都装了时让你选择游戏，并在改动前要求输入 Y 确认。
+#
 # 两类补丁：
 #   遮罩层修复  让引擎里的"游戏主程序哈希白名单"检查直接通过。作者在引擎里写死了某一版国服主程序的哈希，
 #               游戏一更新就对不上，原生遮罩随之静默失效（面板照样显示遮罩界面，画面却没有人景分离）。
@@ -24,7 +27,8 @@ param(
     [string]$Client='Auto',
     [switch]$NoMaskFix,
     [switch]$NoRelax,
-    [switch]$KnownOnly
+    [switch]$KnownOnly,
+    [switch]$Yes   # 自动查找时跳过 Y 确认（-Engine 指定时本来就不询问）
 )
 $ErrorActionPreference='Stop'
 
@@ -59,22 +63,71 @@ function Get-Sha([byte[]]$Bytes){
 function Assert-GameClosed{
     if(@(Get-Process -ErrorAction SilentlyContinue|Where-Object {$_.ProcessName -match '^(wwm|yysls)$'}).Count){throw '游戏正在运行，请先完全退出游戏。没有改动任何文件。'}
 }
-# 033 安装器在 %LOCALAPPDATA%\033Installer\index 里记着装过的游戏目录
-function Find-Engine{
-    $found=@()
+$NoEngineMessage='没有找到已安装的 033 引擎。请先用 033 安装器安装，或用 -Engine 指定游戏目录里的 033-runtime\033-engine.dll。'
+# 033 安装器在 %LOCALAPPDATA%\033Installer\index 里记着装过的游戏目录。同一游戏的
+# Win64r / Win64rh / Win64 启动目录都可能装了 033，安装记录却只记其中一个，所以一并查找。
+function Find-Engines{
+    $roots=@()
     $index=Join-Path $env:LOCALAPPDATA '033Installer\index'
     if([IO.Directory]::Exists($index)){
         foreach($file in Get-ChildItem -LiteralPath $index -Filter '*.json' -File){
             try{$root=[string](Get-Content -LiteralPath $file.FullName -Raw -Encoding UTF8|ConvertFrom-Json).Root}catch{continue}
-            if(-not $root){continue}
-            $candidate=Join-Path $root '033-runtime\033-engine.dll'
-            if([IO.File]::Exists($candidate)){$found+=$candidate}
+            if($root){$roots+=$root}
         }
     }
-    $found=@($found|Sort-Object -Unique)
-    if($found.Count -eq 1){return $found[0]}
-    if($found.Count -gt 1){throw ('找到多个已安装的 033，请用 -Engine 指定其中一个：'+[Environment]::NewLine+($found -join [Environment]::NewLine))}
-    throw '没有找到已安装的 033 引擎。请先用 033 安装器安装，或用 -Engine 指定游戏目录里的 033-runtime\033-engine.dll。'
+    $found=@()
+    foreach($root in $roots){
+        $dirs=@($root)
+        $binaries=Split-Path -Parent $root
+        if($binaries -and (Split-Path -Leaf $binaries) -ieq 'Binaries'){foreach($bin in 'Win64r','Win64rh','Win64'){$dirs+=(Join-Path $binaries $bin)}}
+        foreach($dir in $dirs){
+            $candidate=Join-Path $dir '033-runtime\033-engine.dll'
+            if([IO.File]::Exists($candidate)){$found+=[IO.Path]::GetFullPath($candidate)}
+        }
+    }
+    return @($found|Sort-Object -Unique)
+}
+# 一个引擎的说明：国服/国际服、033 版本、能否打补丁、所属游戏（…\Engine\Binaries）和启动目录名。
+function Get-EngineInfo([string]$Path){
+    $kind=try{Get-ClientKind $Path}catch{''}
+    $client=$(switch($kind){'Intl'{'国际服'}'CN'{'国服'}default{'未知客户端'}})
+    try{$version=(Read-Engine $Path).Spec.Name;$supported=$true}catch{$version='未识别的版本';$supported=$false}
+    $folder=Split-Path -Parent (Split-Path -Parent $Path)
+    return [pscustomobject]@{Path=$Path;Client=$client;Version=$version;Supported=$supported;Game=(Split-Path -Parent $folder);Folder=(Split-Path -Leaf $folder)}
+}
+# 自动查找时选出要处理的引擎：只有一个游戏就用它，否则列出编号让用户选；改动前要求输入 Y。
+function Select-Targets([string]$Verb){
+    $all=@(Find-Engines|ForEach-Object {Get-EngineInfo $_})
+    if(-not $all.Count){throw $NoEngineMessage}
+    foreach($e in @($all|Where-Object {-not $_.Supported})){
+        Write-Host ('跳过：'+$e.Client+' '+$e.Folder+' 的 033 是'+$e.Version+'，不需要或无法打补丁（例如 V6.0）。') -ForegroundColor DarkYellow
+    }
+    $usable=@($all|Where-Object {$_.Supported})
+    if(-not $usable.Count){throw '找到的 033 引擎都不需要或无法打补丁，没有改动任何文件。'}
+    $games=@($usable|Group-Object -Property Game)
+    $chosen=$games[0]
+    if($games.Count -gt 1){
+        Write-Host ''
+        Write-Host ('找到多个装了 033 的游戏，请选择要'+$Verb+'的一个：')
+        for($i=0;$i -lt $games.Count;$i++){
+            $group=@($games[$i].Group)
+            Write-Host ('  ['+($i+1)+'] '+$group[0].Client+'  033 '+(@($group|ForEach-Object {$_.Version}|Sort-Object -Unique) -join ' / ')+'  启动目录：'+(@($group|ForEach-Object {$_.Folder}) -join '、'))
+            Write-Host ('      '+$games[$i].Name)
+        }
+        $answer=Read-Host ('输入编号 1-'+$games.Count+' 后回车（直接回车取消）')
+        $number=0
+        if(-not [int]::TryParse(([string]$answer).Trim(),[ref]$number) -or $number -lt 1 -or $number -gt $games.Count){throw '已取消，没有改动任何文件。'}
+        $chosen=$games[$number-1]
+    }
+    $targets=@($chosen.Group)
+    Write-Host ''
+    Write-Host ('将要'+$Verb+'以下 '+$targets.Count+' 个 033 引擎：')
+    foreach($t in $targets){Write-Host ('  '+$t.Client+'  033 '+$t.Version+'  '+$t.Path)}
+    if(-not $Yes){
+        $confirm=Read-Host '确认继续请输入 Y 后回车，输入其他内容取消'
+        if(([string]$confirm).Trim() -notmatch '^[Yy]$'){throw '已取消，没有改动任何文件。'}
+    }
+    return @($targets|ForEach-Object {$_.Path})
 }
 function Get-SiteState([byte[]]$Bytes,$Site){
     $at=[int]$Site[0];$isOld=$true;$isNew=$true
@@ -199,33 +252,52 @@ function Show-Status([string]$Path){
     Write-Host ('  SHA-256           ：'+(Get-Sha $bytes))
 }
 
+function Invoke-Apply([string]$Path){
+    $loaded=Read-Engine $Path;$bytes=$loaded.Bytes;$spec=$loaded.Spec;$kind=Get-ClientKind $Path
+    $before=Get-Sha $bytes
+    Save-Original $Path $bytes $spec
+    Set-Site $bytes $spec.ExeSite (-not $NoMaskFix)
+    foreach($site in $spec.IntlSites){Set-Site $bytes $site ($kind -eq 'Intl')}
+    foreach($site in $spec.RelaxSites){Set-Site $bytes $site (-not $NoRelax)}
+    Reset-Pin $bytes $spec
+    Write-Engine $Path $bytes $before
+    Write-Host ('已为 '+$spec.Name+' 打好补丁。') -ForegroundColor Green
+    Show-Status $Path
+}
+function Invoke-Revert([string]$Path){
+    $loaded=Read-Engine $Path;$bytes=$loaded.Bytes;$spec=$loaded.Spec
+    $before=Get-Sha $bytes
+    foreach($site in (Get-AllSites $spec)){Set-Site $bytes $site $false}
+    Reset-Pin $bytes $spec
+    if((Get-Sha $bytes) -ne $spec.Sha){throw '还原后与原版核对不上，没有改动。'}
+    Write-Engine $Path $bytes $before
+    Write-Host ('已还原 '+$spec.Name+' 补丁前的引擎：'+$Path) -ForegroundColor Green
+}
+
 try{
-    if(-not $Engine){$Engine=Find-Engine}
-    $Engine=[IO.Path]::GetFullPath($Engine)
+    if($Engine){$Engine=[IO.Path]::GetFullPath($Engine)}
     switch($Action){
-        'Status'{Show-Status $Engine}
+        'Status'{
+            $paths=$(if($Engine){@($Engine)}else{@(Find-Engines)})
+            if(-not $paths.Count){throw $NoEngineMessage}
+            for($i=0;$i -lt $paths.Count;$i++){
+                if($i){Write-Host ''}
+                try{Show-Status $paths[$i]}catch{
+                    Write-Host ('引擎：'+$paths[$i])
+                    Write-Host '  未识别的 033 版本（例如 V6.0），不需要或无法打补丁。' -ForegroundColor DarkYellow
+                }
+            }
+        }
         'Apply'{
             Assert-GameClosed
-            $loaded=Read-Engine $Engine;$bytes=$loaded.Bytes;$spec=$loaded.Spec;$kind=Get-ClientKind $Engine
-            $before=Get-Sha $bytes
-            Save-Original $Engine $bytes $spec
-            Set-Site $bytes $spec.ExeSite (-not $NoMaskFix)
-            foreach($site in $spec.IntlSites){Set-Site $bytes $site ($kind -eq 'Intl')}
-            foreach($site in $spec.RelaxSites){Set-Site $bytes $site (-not $NoRelax)}
-            Reset-Pin $bytes $spec
-            Write-Engine $Engine $bytes $before
-            Write-Host ('已为 '+$spec.Name+' 打好补丁。') -ForegroundColor Green
-            Show-Status $Engine
+            $targets=$(if($Engine){@($Engine)}else{@(Select-Targets '打补丁')})
+            foreach($t in $targets){Write-Host '';Invoke-Apply $t}
         }
         'Revert'{
             Assert-GameClosed
-            $loaded=Read-Engine $Engine;$bytes=$loaded.Bytes;$spec=$loaded.Spec
-            $before=Get-Sha $bytes
-            foreach($site in (Get-AllSites $spec)){Set-Site $bytes $site $false}
-            Reset-Pin $bytes $spec
-            if((Get-Sha $bytes) -ne $spec.Sha){throw '还原后与原版核对不上，没有改动。'}
-            Write-Engine $Engine $bytes $before
-            Write-Host ('已还原 '+$spec.Name+' 补丁前的引擎，现在可以用 033 安装器卸载或升级。') -ForegroundColor Green
+            $targets=$(if($Engine){@($Engine)}else{@(Select-Targets '还原')})
+            foreach($t in $targets){Write-Host '';Invoke-Revert $t}
+            Write-Host '现在可以用 033 安装器卸载或升级。' -ForegroundColor Green
         }
     }
 }catch{

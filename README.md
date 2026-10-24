@@ -15,10 +15,17 @@ Built-in exact profiles: V6.3, V6.3.5, V6.38, V6.3 Enhanced R7. Other versions a
 ## Usage
 
 1. Quit the game and install the plugin with the 033 installer.
-2. Double-click `apply-patch.cmd`. It finds the game automatically and applies the international part only if `wwm.exe` is present.
-3. Before uninstalling or upgrading the plugin, double-click `remove-patch.cmd`. It restores the engine byte for byte to its pre-patch state. After installing the update, run `apply-patch.cmd` again to attempt automatic adaptation.
+2. Double-click `apply-patch.cmd` and follow the prompts in the console window:
+   - It finds every game with 033 installed. **The Win64r and Win64rh launcher folders of the same game are handled together.**
+   - If both the CN and the international client have a patchable 033, it lists them by number; type a number and press Enter to choose the game.
+   - Before changing anything it lists the engines it will patch. **Type Y and press Enter to confirm**; anything else cancels without changes.
+   - Versions that need no patch or cannot be patched (for example V6.0) are shown as skipped.
+   - The international part is applied only when the game folder contains `wwm.exe`; the CN client gets the mask fix only.
+3. Before uninstalling or upgrading the plugin, double-click `remove-patch.cmd`, choose the game the same way and confirm with Y. It restores the engine byte for byte to its pre-patch state. After installing the update, run `apply-patch.cmd` again to attempt automatic adaptation.
 
-`check-status.cmd` only shows the current state; it does not write the engine or create recovery data. The `.cmd` files call `patch-033.ps1`. Keep `auto-detect.cs` beside that script. The scanner uses the .NET compiler included with Windows PowerShell; no Python or disassembler installation is needed.
+`check-status.cmd` lists every 033 engine it finds: CN or international, 033 version, patch state and launcher folder. It only reads; it does not write the engine or create recovery data.
+
+The patch folder can live anywhere, as long as `apply-patch.cmd`, `check-status.cmd`, `remove-patch.cmd`, `patch-033.ps1` and `auto-detect.cs` stay together. The script finds games through the 033 installer's records (`%LOCALAPPDATA%\033Installer\index`) and tells CN from international by whether the engine's game folder contains `yysls.exe` or `wwm.exe`. The `.cmd` files call `patch-033.ps1`. Keep `auto-detect.cs` beside that script. The scanner uses the .NET compiler included with Windows PowerShell; no Python or disassembler installation is needed.
 
 ## Automatic adaptation
 
@@ -28,11 +35,13 @@ Built-in exact profiles: V6.3, V6.3.5, V6.38, V6.3 Enhanced R7. Other versions a
 - A newly calculated hash identifies a local original and verifies restoration; **it does not authenticate the publisher**. Built-in profiles retain their pinned original hashes. Use `apply-patch.cmd -KnownOnly` to disable automatic adaptation.
 - First-time adaptation requires an unpatched engine. On failure, keep the error message and restore a clean engine with the 033 installer before retrying. Structural changes still require updated detection rules. The script will not guess offsets or apply only a subset of the detected family.
 
-To specify an engine and client explicitly:
+To specify an engine and client explicitly (with `-Engine`, only that engine is processed, without prompts):
 
 ```powershell
 .\apply-patch.cmd -Engine 'D:\Games\WWM\033-runtime\033-engine.dll' -Client Intl
 ```
+
+Add `-Yes` to skip the Y confirmation when the engines are found automatically, for example in your own script.
 
 Automatic adaptation does not change shader hashes or the shader library, and does not download or upgrade the 033 plugin.
 
