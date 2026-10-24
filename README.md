@@ -7,7 +7,6 @@ An unofficial patch for the "033 Yanyun edition" DLSS5 plugin for *Where Winds M
 ## What it fixes
 
 - **V6.3 person/scene separation breaks after game updates** (Chinese and international clients). The plugin pins the hash of one game executable; after an update the native mask is silently disabled while the panel still shows the mask UI. The patch makes that check pass. Shaders are still matched by exact hash, so nothing is applied to the wrong shader.
-- **Native masks on the international client** (`wwm.exe`). The plugin only enables them for `yysls.exe`. Everything else in 033 already works on the international client without this patch.
 - **V6.3.5 / V6.38 / V6.3 Enhanced R7 and structurally compatible updates:** materials missing from the author's mask library no longer void the whole frame's mask; they are treated as scenery (disable with `-NoRelax`).
 
 Built-in exact profiles: V6.3, V6.3.5, V6.38, V6.3 Enhanced R7. Other versions are automatically scanned for compatible code, without manually adding their SHA-256 or file offsets. Detection targets the V6.38 / R7 code family. Changed or ambiguous code is rejected; compatibility with every future release is not guaranteed.
